@@ -1,8 +1,7 @@
 # RxHCC FWA Agent — Python Dependencies
 # Install: pip install -r requirements.txt
 
-# ── Google ADK + Gemini ────────────────────────────────────────────────────────
-google-adk>=1.0.0,<2.0.0
+# ── Google Gemini ─────────────────────────────────────────────────────────────
 google-genai>=1.0.0,<2.0.0
 
 # ── Streamlit UI ───────────────────────────────────────────────────────────────
