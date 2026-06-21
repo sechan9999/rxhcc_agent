@@ -12,6 +12,22 @@ import streamlit as st
 from google.adk.sessions import InMemorySessionService
 from google.genai import types
 
+# ── Load API key from Streamlit secrets (Cloud) or environment (local) ────────
+if "GOOGLE_API_KEY" in st.secrets:
+    os.environ["GOOGLE_API_KEY"] = st.secrets["GOOGLE_API_KEY"]
+elif "GEMINI_API_KEY" in st.secrets:
+    os.environ["GOOGLE_API_KEY"] = st.secrets["GEMINI_API_KEY"]
+
+if not os.environ.get("GOOGLE_API_KEY"):
+    st.error(
+        "🔑 **GOOGLE_API_KEY not set.**\n\n"
+        "- **Streamlit Cloud:** Go to App Settings → Secrets and add:\n"
+        "  ```\n  GOOGLE_API_KEY = \"your_key_here\"\n  ```\n"
+        "- **Local:** `export GOOGLE_API_KEY=your_key_here`\n\n"
+        "Get a free key at https://aistudio.google.com/app/apikey"
+    )
+    st.stop()
+
 from agents import fwa_orchestrator, create_runner
 
 # ── Page config ───────────────────────────────────────────────────────────────
@@ -206,8 +222,21 @@ Please conduct a full investigation following the standard FWA workflow."""
                         for part in event.content.parts:
                             if hasattr(part, "text") and part.text and part.text.strip():
                                 agent_logs.append(f"[{author}]\n{part.text.strip()}")
+                    # Guard: event.content can be None on Gemini errors
                     if event.is_final_response():
-                        final_text = event.content.parts[0].text
+                        if (hasattr(event, "content")
+                                and event.content
+                                and event.content.parts
+                                and event.content.parts[0].text):
+                            final_text = event.content.parts[0].text
+                        break
+
+                if not final_text:
+                    final_text = (
+                        "⚠️ The agent pipeline did not return a response. "
+                        "This usually means the Gemini model returned an empty reply. "
+                        "Check that your GOOGLE_API_KEY has quota remaining and try again."
+                    )
                 return final_text
 
             final_response = asyncio.run(run_investigation())
