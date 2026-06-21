@@ -215,14 +215,19 @@ Please conduct a full investigation following the standard FWA workflow."""
                     ),
                 )
                 final_text = ""
+                last_agent_text = ""   # fallback: last non-empty text from any agent
                 for event in events:
-                    # Collect sub-agent outputs for the trace
+                    # Collect sub-agent outputs for the trace AND as fallback text
                     author = getattr(event, "author", "agent")
                     if hasattr(event, "content") and event.content:
                         for part in event.content.parts:
                             if hasattr(part, "text") and part.text and part.text.strip():
-                                agent_logs.append(f"[{author}]\n{part.text.strip()}")
-                    # Guard: event.content can be None on Gemini errors
+                                text = part.text.strip()
+                                agent_logs.append(f"[{author}]\n{text}")
+                                last_agent_text = text  # keep updating
+
+                    # In ADK orchestrator mode, is_final_response() can fire
+                    # with content=None — the real output is in sub-agent events above
                     if event.is_final_response():
                         if (hasattr(event, "content")
                                 and event.content
@@ -230,6 +235,10 @@ Please conduct a full investigation following the standard FWA workflow."""
                                 and event.content.parts[0].text):
                             final_text = event.content.parts[0].text
                         break
+
+                # Use last sub-agent text if orchestrator final event was empty
+                if not final_text and last_agent_text:
+                    final_text = last_agent_text
 
                 if not final_text:
                     final_text = (
