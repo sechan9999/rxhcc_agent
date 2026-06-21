@@ -1,0 +1,46 @@
+[
+  {
+    "scenario": "Clean — Diabetic Maintenance",
+    "expected_verdict": "CLEAR",
+    "claim_id": "CLM-2024-001",
+    "beneficiary_id": "BNF-F-99211",
+    "icd10_codes": ["E11.9", "Z79.4"],
+    "ndc_codes": ["00002143480"],
+    "provider_npi": "1111111111",
+    "claim_amount": 320.00,
+    "notes": "Routine insulin prescription for Type 2 diabetes. All codes valid, no red flags."
+  },
+  {
+    "scenario": "Suspicious — Opioid/Benzo Combination",
+    "expected_verdict": "FLAG_FOR_REVIEW or ESCALATE",
+    "claim_id": "CLM-2024-002",
+    "beneficiary_id": "BNF-M-44831",
+    "icd10_codes": ["G89.29", "F11.10"],
+    "ndc_codes": ["00406051201", "59011049010"],
+    "provider_npi": "9876543210",
+    "claim_amount": 1250.00,
+    "notes": "OxyContin 80mg + Alprazolam 2mg co-prescribed. Opioid + benzo combo has FDA Black Box warning. Provider is a flagged pharmacy."
+  },
+  {
+    "scenario": "Escalate — Gender Mismatch + High-Risk Provider",
+    "expected_verdict": "ESCALATE",
+    "claim_id": "CLM-2024-003",
+    "beneficiary_id": "BNF-M-77542",
+    "icd10_codes": ["C50.911", "E11.9"],
+    "ndc_codes": ["00406051201", "59011049010", "65162010850"],
+    "provider_npi": "1234567890",
+    "claim_amount": 8400.00,
+    "notes": "MALE beneficiary billed for female breast cancer (C50.911). Plus opioid+benzo+soma 'holy trinity' from a top-1% opioid prescriber. Multiple ESCALATE triggers."
+  },
+  {
+    "scenario": "Upcoding Attempt — High Severity Mismatch",
+    "expected_verdict": "FLAG_FOR_REVIEW",
+    "claim_id": "CLM-2024-004",
+    "beneficiary_id": "BNF-F-55103",
+    "icd10_codes": ["N18.6", "I50.9"],
+    "ndc_codes": ["00088502905"],
+    "provider_npi": "2222222222",
+    "claim_amount": 6200.00,
+    "notes": "End-stage renal disease + heart failure (both severity 4-5) billed with only Ozempic. Diagnosis-drug mismatch. Claim amount far above expected."
+  }
+]
