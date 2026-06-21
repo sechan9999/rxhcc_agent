@@ -1,17 +1,13 @@
 """
 agents.py — RxHCC FWA Agent
-Built with Google ADK + Gemini 2.0 Flash for the Kaggle
+Built with Google GenAI SDK (direct call) for the Kaggle
 "5-Day AI Agents: Intensive Vibe Coding" Capstone (Agents for Good track).
 
-Single-agent design: fwa_agent holds all 5 tools and uses Gemini's native
-function-calling to sequence through them autonomously — no sub-agent
-delegation, maximum reliability across ADK versions.
+Bypasses Google ADK, invoking google-genai directly with a manual tool loop.
 """
 
 import os
-from google.adk.agents import Agent
-from google.adk.runners import Runner
-from google.adk.sessions import InMemorySessionService
+from google import genai
 from google.genai import types
 
 from tools import (
@@ -81,44 +77,114 @@ After all 5 tool calls, present:
 IMPORTANT: You MUST call all 5 tools before writing your final answer.
 Do not skip any tool. Do not guess — always call the tool to get real data."""
 
-# ── Single agent with all 5 tools ─────────────────────────────────────────────
-fwa_agent = Agent(
-    model=MODEL,
-    name="fwa_agent",
-    description=(
-        "Autonomous Medicare Part D FWA investigator using RxHCC risk scoring. "
-        "Validates ICD-10 codes, checks drug combinations, profiles providers, "
-        "calculates fraud risk, and generates SIU-ready compliance reports."
-    ),
-    instruction=SYSTEM_INSTRUCTION,
-    tools=[
+
+def run_fwa_investigation(prompt: str, agent_logs: list) -> str:
+    """
+    Execute the FWA investigation using the google-genai client directly,
+    running a manual loop to handle tool calls / function calling.
+    """
+    # Create the GenAI client.
+    # It automatically picks up GOOGLE_API_KEY from environment variables.
+    client = genai.Client()
+
+    # Define tools list
+    tools_list = [
         lookup_icd10_code,
         get_provider_billing_history,
         check_drug_combination,
         calculate_rxhcc_risk_score,
         generate_fwa_report,
-    ],
-)
+    ]
 
-# Keep fwa_orchestrator as an alias so app.py imports don't break
-fwa_orchestrator = fwa_agent
+    # Initialize the history with the user prompt
+    history = [
+        types.Content(
+            role="user",
+            parts=[types.Part.from_text(text=prompt)]
+        )
+    ]
+
+    agent_logs.append("[system]\nInitializing Gemini client and starting manual tool execution loop...")
+
+    max_turns = 10
+    for turn in range(max_turns):
+        agent_logs.append(f"[system]\nCalling Gemini (Turn {turn + 1})...")
+        
+        response = client.models.generate_content(
+            model=MODEL,
+            contents=history,
+            config=types.GenerateContentConfig(
+                system_instruction=SYSTEM_INSTRUCTION,
+                tools=tools_list,
+                temperature=0.0,
+            )
+        )
+
+        # Append assistant response to history
+        if response.candidates and response.candidates[0].content:
+            history.append(response.candidates[0].content)
+
+        # Log agent thoughts if any text was returned
+        if response.text:
+            agent_logs.append(f"[agent]\n{response.text.strip()}")
+
+        # Check for function calls
+        function_calls = response.function_calls
+        if not function_calls:
+            # Loop ends when no more tools are requested
+            return response.text or ""
+
+        tool_response_parts = []
+        for call in function_calls:
+            name = call.name
+            args = call.args
+
+            agent_logs.append(f"[agent calling tool]\nTool: {name}\nArgs: {args}")
+
+            # Match and execute the correct function
+            func = None
+            if name == "lookup_icd10_code":
+                func = lookup_icd10_code
+            elif name == "get_provider_billing_history":
+                func = get_provider_billing_history
+            elif name == "check_drug_combination":
+                func = check_drug_combination
+            elif name == "calculate_rxhcc_risk_score":
+                func = calculate_rxhcc_risk_score
+            elif name == "generate_fwa_report":
+                func = generate_fwa_report
+
+            if func:
+                try:
+                    result = func(**args)
+                    agent_logs.append(f"[tool result]\n{result}")
+                except Exception as e:
+                    result = {"error": str(e)}
+                    agent_logs.append(f"[tool error]\n{e}")
+            else:
+                result = {"error": f"Tool {name} not found"}
+                agent_logs.append(f"[tool error]\nTool {name} not found")
+
+            tool_response_parts.append(
+                types.Part.from_function_response(
+                    name=name,
+                    response=result
+                )
+            )
+
+        # Add the tool execution results to history
+        history.append(
+            types.Content(
+                role="tool",
+                parts=tool_response_parts
+            )
+        )
+
+    return "Error: Maximum tool execution turns exceeded."
 
 
-# ── Runner factory ─────────────────────────────────────────────────────────────
-def create_runner() -> tuple[Runner, InMemorySessionService]:
-    session_service = InMemorySessionService()
-    runner = Runner(
-        agent=fwa_agent,
-        app_name="rxhcc_fwa_agent",
-        session_service=session_service,
-    )
-    return runner, session_service
-
-
-# ── Quick CLI test ─────────────────────────────────────────────────────────────
 if __name__ == "__main__":
-    import asyncio
-
+    # Test script for manual CLI testing
     TEST_CLAIM = """
 Investigate this Medicare Part D claim for FWA:
 
@@ -130,23 +196,11 @@ Provider NPI:    1234567890
 Claim Amount:    $8,400.00
 Date of Service: 2024-11-15
 """
-
-    async def run_test():
-        runner, svc = create_runner()
-        session = await svc.create_session(
-            app_name="rxhcc_fwa_agent", user_id="test_user"
-        )
-        events = runner.run(
-            user_id="test_user",
-            session_id=session.id,
-            new_message=types.Content(
-                role="user",
-                parts=[types.Part(text=TEST_CLAIM)],
-            ),
-        )
-        for event in events:
-            if event.is_final_response():
-                if event.content and event.content.parts:
-                    print(event.content.parts[0].text)
-
-    asyncio.run(run_test())
+    logs = []
+    print("Running test...")
+    final_rep = run_fwa_investigation(TEST_CLAIM, logs)
+    print("\n--- FINAL REPORT ---")
+    print(final_rep)
+    print("\n--- LOGS ---")
+    for log in logs:
+        print(log)
