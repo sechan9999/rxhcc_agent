@@ -86,15 +86,45 @@ with st.sidebar:
 
     st.divider()
     st.header("⚙️ Settings")
+    
+    # Query available models dynamically from Gemini API based on user credentials
+    model_options = ["gemini-2.0-flash", "gemini-1.5-flash", "gemini-1.5-pro"]
+    if os.environ.get("GOOGLE_API_KEY"):
+        try:
+            from google import genai
+            temp_client = genai.Client()
+            api_models = temp_client.models.list()
+            fetched_models = []
+            for m in api_models:
+                m_name = m.name.split("/")[-1] if "/" in m.name else m.name
+                
+                # Check if model supports content generation
+                supports_gen = False
+                if hasattr(m, "supported_methods"):
+                    supports_gen = any("generateContent" in method for method in m.supported_methods)
+                elif hasattr(m, "supported_generation_methods"):
+                    supports_gen = any("generateContent" in method for method in m.supported_generation_methods)
+                else:
+                    supports_gen = True
+                    
+                if supports_gen and "gemini" in m_name.lower():
+                    fetched_models.append(m_name)
+                    
+            if fetched_models:
+                unique_models = list(set(fetched_models))
+                if "gemini-2.0-flash" in unique_models:
+                    unique_models.remove("gemini-2.0-flash")
+                    model_options = ["gemini-2.0-flash"] + sorted(unique_models)
+                else:
+                    model_options = sorted(unique_models)
+        except Exception:
+            pass
+
     selected_model = st.selectbox(
         "Select Gemini Model:",
-        [
-            "gemini-2.0-flash",
-            "gemini-1.5-flash",
-            "gemini-1.5-pro",
-        ],
+        model_options,
         index=0,
-        help="If you encounter 429 Resource Exhausted rate limits on the free tier, try switching models."
+        help="Only models supported by your Google API Key are listed. Switch models if you hit rate limits."
     )
 
     st.divider()
