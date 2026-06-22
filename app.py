@@ -28,6 +28,9 @@ if not os.environ.get("GOOGLE_API_KEY"):
     st.stop()
 
 # ── Import FWA investigation agent ────────────────────────────────────────────
+import importlib
+import agents
+importlib.reload(agents)
 from agents import run_fwa_investigation
 
 # ── Page config ───────────────────────────────────────────────────────────────
