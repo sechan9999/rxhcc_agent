@@ -82,6 +82,19 @@ with st.sidebar:
     )
 
     st.divider()
+    st.header("⚙️ Settings")
+    selected_model = st.selectbox(
+        "Select Gemini Model:",
+        [
+            "gemini-2.0-flash",
+            "gemini-1.5-flash",
+            "gemini-1.5-pro",
+        ],
+        index=0,
+        help="If you encounter 429 Resource Exhausted rate limits on the free tier, try switching models."
+    )
+
+    st.divider()
     st.header("ℹ️ How It Works")
     st.markdown("""
 **5 tools called autonomously:**
@@ -199,7 +212,7 @@ Please conduct a full investigation following the standard FWA workflow."""
 
     with st.spinner("Agent working... (validating codes → scoring risk → generating report)"):
         try:
-            final_text = run_fwa_investigation(prompt, agent_logs)
+            final_text = run_fwa_investigation(prompt, agent_logs, model=selected_model)
 
             if not final_text:
                 final_text = (

@@ -7,6 +7,7 @@ Bypasses Google ADK, invoking google-genai directly with a manual tool loop.
 """
 
 import os
+import time
 from google import genai
 from google.genai import types
 
@@ -78,11 +79,14 @@ IMPORTANT: You MUST call all 5 tools before writing your final answer.
 Do not skip any tool. Do not guess — always call the tool to get real data."""
 
 
-def run_fwa_investigation(prompt: str, agent_logs: list) -> str:
+def run_fwa_investigation(prompt: str, agent_logs: list, model: str = None) -> str:
     """
     Execute the FWA investigation using the google-genai client directly,
     running a manual loop to handle tool calls / function calling.
     """
+    # Use selected model or default fallback
+    target_model = model or MODEL
+
     # Create the GenAI client.
     # It automatically picks up GOOGLE_API_KEY from environment variables.
     client = genai.Client()
@@ -104,21 +108,39 @@ def run_fwa_investigation(prompt: str, agent_logs: list) -> str:
         )
     ]
 
-    agent_logs.append("[system]\nInitializing Gemini client and starting manual tool execution loop...")
+    agent_logs.append(f"[system]\nInitializing Gemini client using {target_model} and starting manual tool execution loop...")
 
     max_turns = 10
     for turn in range(max_turns):
         agent_logs.append(f"[system]\nCalling Gemini (Turn {turn + 1})...")
         
-        response = client.models.generate_content(
-            model=MODEL,
-            contents=history,
-            config=types.GenerateContentConfig(
-                system_instruction=SYSTEM_INSTRUCTION,
-                tools=tools_list,
-                temperature=0.0,
-            )
-        )
+        # Exponential backoff retry loop for rate limiting/429
+        max_retries = 3
+        response = None
+        for retry in range(max_retries):
+            try:
+                response = client.models.generate_content(
+                    model=target_model,
+                    contents=history,
+                    config=types.GenerateContentConfig(
+                        system_instruction=SYSTEM_INSTRUCTION,
+                        tools=tools_list,
+                        temperature=0.0,
+                    )
+                )
+                break
+            except Exception as e:
+                err_str = str(e).lower()
+                is_rate_limit = "429" in err_str or "resource_exhausted" in err_str or "quota" in err_str
+                if is_rate_limit and retry < max_retries - 1:
+                    wait_time = (retry + 1) * 6
+                    agent_logs.append(
+                        f"[system]\nRate limit hit (429/Resource Exhausted). "
+                        f"Retrying in {wait_time}s... (Attempt {retry+1}/{max_retries})"
+                    )
+                    time.sleep(wait_time)
+                    continue
+                raise e
 
         # Append assistant response to history
         if response.candidates and response.candidates[0].content:
