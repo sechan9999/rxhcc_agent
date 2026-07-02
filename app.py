@@ -1,12 +1,9 @@
 """
 app.py — RxHCC FWA Agent | Streamlit Demo UI
 Kaggle Capstone: 5-Day AI Agents Intensive Vibe Coding (Agents for Good)
-
-Run:  streamlit run app.py
 """
 
 import os
-import asyncio
 import json
 import time
 import streamlit as st
@@ -17,10 +14,16 @@ from google.adk.sessions import InMemorySessionService
 from google.genai import types
 
 # ── Load API key from Streamlit secrets (Cloud) or environment (local) ────────
-if "GOOGLE_API_KEY" in st.secrets:
-    os.environ["GOOGLE_API_KEY"] = st.secrets["GOOGLE_API_KEY"]
-elif "GEMINI_API_KEY" in st.secrets:
-    os.environ["GOOGLE_API_KEY"] = st.secrets["GEMINI_API_KEY"]
+from streamlit.errors import StreamlitSecretNotFoundError
+
+# Safely load API key from Streamlit secrets if available, otherwise rely on environment variable
+try:
+    secret_key = st.secrets.get("GOOGLE_API_KEY") or st.secrets.get("GEMINI_API_KEY")
+except StreamlitSecretNotFoundError:
+    secret_key = None
+
+if secret_key:
+    os.environ["GOOGLE_API_KEY"] = secret_key
 
 if not os.environ.get("GOOGLE_API_KEY"):
     st.error(
@@ -47,20 +50,18 @@ st.set_page_config(
 )
 
 # ── Custom CSS ────────────────────────────────────────────────────────────────
-st.markdown("""
-<style>
-.verdict-clear    { background:#d4edda; color:#155724; padding:12px 18px;
-                    border-radius:8px; font-weight:bold; font-size:1.1rem; }
-.verdict-flag     { background:#fff3cd; color:#856404; padding:12px 18px;
-                    border-radius:8px; font-weight:bold; font-size:1.1rem; }
-.verdict-escalate { background:#f8d7da; color:#721c24; padding:12px 18px;
-                    border-radius:8px; font-weight:bold; font-size:1.1rem; }
-.metric-box       { background:#f8f9fa; border:1px solid #dee2e6;
-                    border-radius:8px; padding:14px; text-align:center; }
-.agent-trace      { background:#1e1e2e; color:#cdd6f4; font-family:monospace;
-                    font-size:0.82rem; padding:12px; border-radius:6px; }
-</style>
-""", unsafe_allow_html=True)
+st.markdown(
+    """
+    <style>
+    .verdict-clear    { background:#d4edda; color:#155724; padding:12px 18px; border-radius:8px; font-weight:bold; font-size:1.1rem; }
+    .verdict-flag     { background:#fff3cd; color:#856404; padding:12px 18px; border-radius:8px; font-weight:bold; font-size:1.1rem; }
+    .verdict-escalate { background:#f8d7da; color:#721c24; padding:12px 18px; border-radius:8px; font-weight:bold; font-size:1.1rem; }
+    .metric-box       { background:#f8f9fa; border:1px solid #dee2e6; border-radius:8px; padding:14px; text-align:center; }
+    .agent-trace      { background:#1e1e2e; color:#cdd6f4; font-family:monospace; font-size:0.82rem; padding:12px; border-radius:6px; }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
 
 # ── Header ────────────────────────────────────────────────────────────────────
 st.title("🏥 RxHCC FWA Investigation Agent")
@@ -88,16 +89,11 @@ with st.sidebar:
         ],
         index=0,
     )
-    # Demo mode toggle – when enabled, tools use mock data (handled inside tools.py)
     demo_mode = st.checkbox("🧪 Demo mode (use mock data)", value=True, help="When enabled, the agent runs against simulated data for faster demos.")
     if demo_mode:
         st.info("Demo mode is ON: tool calls will return simulated responses.")
-
-
     st.divider()
     st.header("⚙️ Settings")
-    
-    # Query available models dynamically from Gemini API based on user credentials
     model_options = ["gemini-2.0-flash", "gemini-1.5-flash", "gemini-1.5-pro"]
     if os.environ.get("GOOGLE_API_KEY"):
         try:
@@ -107,19 +103,13 @@ with st.sidebar:
             fetched_models = []
             for m in api_models:
                 m_name = m.name.split("/")[-1] if "/" in m.name else m.name
-                
-                # Check if model supports content generation
-                supports_gen = False
+                supports_gen = True
                 if hasattr(m, "supported_methods"):
                     supports_gen = any("generateContent" in method for method in m.supported_methods)
                 elif hasattr(m, "supported_generation_methods"):
                     supports_gen = any("generateContent" in method for method in m.supported_generation_methods)
-                else:
-                    supports_gen = True
-                    
                 if supports_gen and "gemini" in m_name.lower():
                     fetched_models.append(m_name)
-                    
             if fetched_models:
                 unique_models = list(set(fetched_models))
                 if "gemini-2.0-flash" in unique_models:
@@ -129,35 +119,25 @@ with st.sidebar:
                     model_options = sorted(unique_models)
         except Exception:
             pass
-
     selected_model = st.selectbox(
         "Select Gemini Model:",
         model_options,
         index=0,
-        help="Only models supported by your Google API Key are listed. Switch models if you hit rate limits."
+        help="Only models supported by your Google API Key are listed. Switch models if you hit rate limits.",
     )
-
     st.divider()
     st.header("ℹ️ How It Works")
-    st.markdown("""
-**5 tools called autonomously:**
+    st.markdown(
+        """
+        **5 tools called autonomously:**
 
-1. 🔍 **lookup_icd10_code**
-   Validates diagnosis codes, flags gender restrictions
-
-2. 💊 **check_drug_combination**
-   Detects opioid+benzo, pill-mill patterns
-
-3. 🏥 **get_provider_billing_history**
-   Provider anomaly score vs peer benchmarks
-
-4. 📊 **calculate_rxhcc_risk_score**
-   Composite RxHCC fraud probability (0–100%)
-
-5. 📄 **generate_fwa_report**
-   SIU-ready compliance report
-""")
-
+        1. 🔍 **lookup_icd10_code**\n   Validates diagnosis codes, flags gender restrictions
+        2. 💊 **check_drug_combination**\n   Detects opioid+benzo, pill-mill patterns
+        3. 🏥 **get_provider_billing_history**\n   Provider anomaly score vs peer benchmarks
+        4. 📊 **calculate_rxhcc_risk_score**\n   Composite RxHCC fraud probability (0–100%)
+        5. 📄 **generate_fwa_report**\n   SIU-ready compliance report
+        """
+    )
     st.divider()
     st.header("📈 FWA Impact")
     st.metric("Annual Medicare Fraud", "$60–100B", delta="-$12B saved by AI detection")
@@ -203,27 +183,31 @@ defaults = SCENARIOS[scenario]
 # CLAIM INPUT FORM
 # ══════════════════════════════════════════════════════════════════════════════
 st.subheader("📝 Claim Details")
-
 if defaults.get("note"):
     st.info(f"💡 {defaults['note']}")
-
 with st.form("claim_form", clear_on_submit=False):
     col1, col2 = st.columns(2)
-
     with col1:
-        claim_id       = st.text_input("Claim ID",                    value=defaults["claim_id"])
-        beneficiary_id = st.text_input("Beneficiary ID",              value=defaults["beneficiary_id"],
-                                        help="Suffix -M- or -F- is used for gender inference")
-        icd10_input    = st.text_input("ICD-10 Codes (comma-separated)", value=defaults["icd10_codes"],
-                                        help="e.g. E11.9, Z79.4, I10")
+        claim_id = st.text_input("Claim ID", value=defaults["claim_id"])
+        beneficiary_id = st.text_input(
+            "Beneficiary ID",
+            value=defaults["beneficiary_id"],
+            help="Suffix -M- or -F- is used for gender inference",
+        )
+        icd10_input = st.text_input(
+            "ICD-10 Codes (comma-separated)",
+            value=defaults["icd10_codes"],
+            help="e.g. E11.9, Z79.4, I10",
+        )
         st.divider()
-
     with col2:
-        ndc_input      = st.text_input("NDC Drug Codes (comma-separated)", value=defaults["ndc_codes"],
-                                        help="11-digit NDC codes from pharmacy claim")
-        provider_npi   = st.text_input("Provider NPI",                value=defaults["provider_npi"])
-        claim_amount   = st.text_input("Claim Amount ($)",            value=defaults["claim_amount"])
-
+        ndc_input = st.text_input(
+            "NDC Drug Codes (comma-separated)",
+            value=defaults["ndc_codes"],
+            help="11-digit NDC codes from pharmacy claim",
+        )
+        provider_npi = st.text_input("Provider NPI", value=defaults["provider_npi"])
+        claim_amount = st.text_input("Claim Amount ($)", value=defaults["claim_amount"])
     submitted = st.form_submit_button(
         "🔍 Investigate Claim", type="primary", use_container_width=True
     )
@@ -235,281 +219,66 @@ if submitted:
     if not all([claim_id, beneficiary_id, icd10_input, provider_npi, claim_amount]):
         st.error("Please fill in all required fields.")
         st.stop()
-
-    prompt = f"""Investigate the following Medicare Part D claim for Fraud, Waste & Abuse:
-
-Claim ID:         {claim_id}
-Beneficiary ID:   {beneficiary_id}
-ICD-10 Codes:     {icd10_input}
-NDC Drug Codes:   {ndc_input if ndc_input else 'None'}
-Provider NPI:     {provider_npi}
-Claim Amount:     ${claim_amount}
-Date of Service:  {time.strftime('%Y-%m-%d')}
-
-Please conduct a full investigation following the standard FWA workflow."""
-
-
-                                # Execute the investigation using the high‑level helper
-                try:
-                    final_text = run_fwa_investigation(prompt, agent_logs, model=selected_model)
-                except Exception as e:
-                    st.error(f"Agent error: {e}")
-                    st.exception(e)
-                    final_text = ""
-
-                # Collect sub‑agent outputs for the trace
-                for event in events:
-                    author = getattr(event, "author", "agent")
-                    if hasattr(event, "content") and event.content:
-                        for part in event.content.parts:
-                            if hasattr(part, "text") and part.text and part.text.strip():
-                                agent_logs.append(f"[{author}]\n{part.text.strip()}")
-                    if event.is_final_response():
-                        # Safely extract final response text
-                        if hasattr(event, "content") and event.content and getattr(event.content, "parts", None):
-                            if len(event.content.parts) > 0 and hasattr(event.content.parts[0], "text"):
-                                final_text = event.content.parts[0].text
-                            else:
-                                final_text = ""
-                        else:
-                            final_text = ""
-
-                return final_text
-        try:
-            final_text = run_fwa_investigation(prompt, agent_logs, model=selected_model)
-        except Exception as e:
-            st.error(f"Agent error: {e}")
-            st.exception(e)
-            final_text = ""
-
-        # Collect sub‑agent outputs for the trace
-        for event in events:
-            author = getattr(event, "author", "agent")
-            if hasattr(event, "content") and event.content:
-                for part in event.content.parts:
-                    if hasattr(part, "text") and part.text and part.text.strip():
-                        agent_logs.append(f"[{author}]\n{part.text.strip()}")
-            if event.is_final_response():
-                # Safely extract final response text
-                if hasattr(event, "content") and event.content and getattr(event.content, "parts", None):
-                    if len(event.content.parts) > 0 and hasattr(event.content.parts[0], "text"):
-                        final_text = event.content.parts[0].text
-                    else:
-                        final_text = ""
-                else:
-                    final_text = ""
-        try:
-            final_text = run_fwa_investigation(prompt, agent_logs, model=selected_model)
-        except Exception as e:
-            st.error(f"Agent error: {e}")
-            st.exception(e)
-            final_text = ""
-
-        # Collect sub‑agent outputs for the trace
-        for event in events:
-            author = getattr(event, "author", "agent")
-            if hasattr(event, "content") and event.content:
-                for part in event.content.parts:
-                    if hasattr(part, "text") and part.text and part.text.strip():
-                        agent_logs.append(f"[{author}]\n{part.text.strip()}")
-            if event.is_final_response():
-                # Safely extract final response text
-                if hasattr(event, "content") and event.content and getattr(event.content, "parts", None):
-                    if len(event.content.parts) > 0 and hasattr(event.content.parts[0], "text"):
-                        final_text = event.content.parts[0].text
-                    else:
-                        final_text = ""
-                else:
-                    final_text = ""
-        try:
-            final_text = run_fwa_investigation(prompt, agent_logs, model=selected_model)
-        except Exception as e:
-            st.error(f"Agent error: {e}")
-            st.exception(e)
-            final_text = ""
-
-        # Collect sub‑agent outputs for the trace
-        for event in events:
-            author = getattr(event, "author", "agent")
-            if hasattr(event, "content") and event.content:
-                for part in event.content.parts:
-                    if hasattr(part, "text") and part.text and part.text.strip():
-                        agent_logs.append(f"[{author}]\n{part.text.strip()}")
-            if event.is_final_response():
-                # Safely extract final response text
-                if hasattr(event, "content") and event.content and getattr(event.content, "parts", None):
-                    if len(event.content.parts) > 0 and hasattr(event.content.parts[0], "text"):
-                        final_text = event.content.parts[0].text
-                    else:
-                        final_text = ""
-                else:
-                    final_text = ""
-        try:
-            final_text = run_fwa_investigation(prompt, agent_logs, model=selected_model)
-        except Exception as e:
-            st.error(f"Agent error: {e}")
-            st.exception(e)
-            final_text = ""
-
-        # Collect sub‑agent outputs for the trace
-        for event in events:
-            author = getattr(event, "author", "agent")
-            if hasattr(event, "content") and event.content:
-                for part in event.content.parts:
-                    if hasattr(part, "text") and part.text and part.text.strip():
-                        agent_logs.append(f"[{author}]\n{part.text.strip()}")
-            if event.is_final_response():
-                # Safely extract final response text
-                if hasattr(event, "content") and event.content and getattr(event.content, "parts", None):
-                    if len(event.content.parts) > 0 and hasattr(event.content.parts[0], "text"):
-                        final_text = event.content.parts[0].text
-                    else:
-                        final_text = ""
-                else:
-                    final_text = ""
-        try:
-            final_text = run_fwa_investigation(prompt, agent_logs, model=selected_model)
-        except Exception as e:
-            st.error(f"Agent error: {e}")
-            st.exception(e)
-            final_text = ""
-
-        # Collect sub‑agent outputs for the trace
-        for event in events:
-            author = getattr(event, "author", "agent")
-            if hasattr(event, "content") and event.content:
-                for part in event.content.parts:
-                    if hasattr(part, "text") and part.text and part.text.strip():
-                        agent_logs.append(f"[{author}]\n{part.text.strip()}")
-            if event.is_final_response():
-                # Safely extract final response text
-                if hasattr(event, "content") and event.content and getattr(event.content, "parts", None):
-                    if len(event.content.parts) > 0 and hasattr(event.content.parts[0], "text"):
-                        final_text = event.content.parts[0].text
-                    else:
-                        final_text = ""
-                else:
-                    final_text = ""
-        try:
-            final_text = run_fwa_investigation(prompt, agent_logs, model=selected_model)
-        except Exception as e:
-            st.error(f"Agent error: {e}")
-            st.exception(e)
-            final_text = ""
-
-        # Collect sub‑agent outputs for the trace
-        for event in events:
-            author = getattr(event, "author", "agent")
-            if hasattr(event, "content") and event.content:
-                for part in event.content.parts:
-                    if hasattr(part, "text") and part.text and part.text.strip():
-                        agent_logs.append(f"[{author}]\n{part.text.strip()}")
-            if event.is_final_response():
-                # Safely extract final response text
-                if hasattr(event, "content") and event.content and getattr(event.content, "parts", None):
-                    if len(event.content.parts) > 0 and hasattr(event.content.parts[0], "text"):
-                        final_text = event.content.parts[0].text
-                    else:
-                        final_text = ""
-                else:
-                    final_text = ""
-
-
-            final_text = run_fwa_investigation(prompt, agent_logs, model=selected_model)
-        except Exception as e:
-            st.error(f"Agent error: {e}")
-            st.exception(e)
-            final_text = ""
-
-        for event in events:
-                    author = getattr(event, "author", "agent")
-                    if hasattr(event, "content") and event.content:
-                        for part in event.content.parts:
-                            if hasattr(part, "text") and part.text and part.text.strip():
-                                agent_logs.append(f"[{author}]\n{part.text.strip()}")
-                    if event.is_final_response():
-                        # Safely extract final response text
-                        if hasattr(event, "content") and event.content and getattr(event.content, "parts", None):
-                            if len(event.content.parts) > 0 and hasattr(event.content.parts[0], "text"):
-                                final_text = event.content.parts[0].text
-
-        # Collect sub‑agent outputs for the trace
-        for event in events:
-            author = getattr(event, "author", "agent")
-            if hasattr(event, "content") and event.content:
-                for part in event.content.parts:
-                    if hasattr(part, "text") and part.text and part.text.strip():
-                        agent_logs.append(f"[{author}]\n{part.text.strip()}")
-            if event.is_final_response():
-                # Safely extract final response text
-                if hasattr(event, "content") and event.content and getattr(event.content, "parts", None):
-                    if len(event.content.parts) > 0 and hasattr(event.content.parts[0], "text"):
-                        final_text = event.content.parts[0].text
-                    else:
-                        final_text = ""
-                else:
-                    final_text = ""
-
-        return final_text
-
-
-
-            # ── Agent Trace ────────────────────────────────────────────────────
-            with trace_placeholder.expander(
-                f"🔧 Agent Tool Trace ({len(agent_logs)} calls)", expanded=False
-            ):
-                for log in agent_logs:
-                    st.markdown(f"```\n{log}\n```")
-            # Provide a download button for the full trace as JSON
-            trace_json = json.dumps(agent_logs, indent=2)
-            st.download_button(
-                label="Download Trace JSON",
-                data=trace_json,
-                file_name="agent_trace.json",
-                mime="application/json",
-                key="download_trace",
-            )
-
-            # ── Parse verdict ──────────────────────────────────────────────────
-            verdict = "UNKNOWN"
-            if "ESCALATE" in final_text.upper():
-                verdict = "ESCALATE"
-            elif "FLAG_FOR_REVIEW" in final_text.upper() or "FLAG FOR REVIEW" in final_text.upper():
-                verdict = "FLAG_FOR_REVIEW"
-            elif "CLEAR" in final_text.upper():
-                verdict = "CLEAR"
-
-            # ── Verdict banner ─────────────────────────────────────────────────
-            VERDICT_CONFIG = {
-                "CLEAR":          ("verdict-clear",    "✅ CLEAR — Approve for Payment"),
-                "FLAG_FOR_REVIEW":("verdict-flag",     "⚠️ FLAG FOR REVIEW — Hold Claim"),
-                "ESCALATE":       ("verdict-escalate", "🚨 ESCALATE — Refer to SIU"),
-                "UNKNOWN":        ("metric-box",       "❓ Verdict Undetermined"),
-            }
-            css_class, label = VERDICT_CONFIG[verdict]
-            st.markdown(f'<div class="{css_class}">{label}</div>', unsafe_allow_html=True)
-            st.markdown("")
-
-            # ── Metrics row ────────────────────────────────────────────────────
-            m1, m2, m3, m4 = st.columns(4)
-            m1.metric("Claim ID", claim_id)
-            m2.metric("Beneficiary", beneficiary_id)
-            m3.metric("Claim Amount", f"${float(claim_amount.replace(',','')):.2f}")
-            m4.metric("Verdict", verdict)
-
-            st.divider()
-
-            # ── Full investigation report ──────────────────────────────────────
-            st.subheader("📄 Full Investigation Report")
-            st.markdown(final_text)
-
-        except Exception as e:
-            st.error(f"Agent error: {e}")
-            st.exception(e)
-            st.info(
-                "💡 Common causes: invalid API key, quota exceeded, "
-                "or network issue. Check https://aistudio.google.com/app/apikey"
-            )
+    prompt = f"""Investigate the following Medicare Part D claim for Fraud, Waste & Abuse:\n\nClaim ID:         {claim_id}\nBeneficiary ID:   {beneficiary_id}\nICD-10 Codes:     {icd10_input}\nNDC Drug Codes:   {ndc_input if ndc_input else 'None'}\nProvider NPI:     {provider_npi}\nClaim Amount:     ${claim_amount}\nDate of Service:  {time.strftime('%Y-%m-%d')}\n\nPlease conduct a full investigation following the standard FWA workflow."""
+    agent_logs = []
+    events = []  # placeholder for agent events; actual agent returns trace inside run_fwa_investigation
+    # Execute investigation and build UI
+    try:
+        final_text = run_fwa_investigation(prompt, agent_logs, model=selected_model)
+    except Exception as e:
+        st.error(f"Agent error: {e}")
+        st.exception(e)
+        final_text = ""
+    # Collect sub‑agent outputs for the trace (if any additional events are populated)
+    for event in events:
+        author = getattr(event, "author", "agent")
+        if hasattr(event, "content") and event.content:
+            for part in event.content.parts:
+                if hasattr(part, "text") and part.text and part.text.strip():
+                    agent_logs.append(f"[{author}]\n{part.text.strip()}")
+        if event.is_final_response():
+            pass
+    # Trace UI
+    trace_placeholder = st.expander(f"🔧 Agent Tool Trace ({len(agent_logs)} calls)", expanded=False)
+    with trace_placeholder:
+        for log in agent_logs:
+            st.markdown(f"```\n{log}\n```")
+    trace_json = json.dumps(agent_logs, indent=2)
+    st.download_button(
+        label="Download Trace JSON",
+        data=trace_json,
+        file_name="agent_trace.json",
+        mime="application/json",
+        key="download_trace",
+    )
+    # Verdict parsing
+    verdict = "UNKNOWN"
+    if "ESCALATE" in final_text.upper():
+        verdict = "ESCALATE"
+    elif "FLAG_FOR_REVIEW" in final_text.upper() or "FLAG FOR REVIEW" in final_text.upper():
+        verdict = "FLAG_FOR_REVIEW"
+    elif "CLEAR" in final_text.upper():
+        verdict = "CLEAR"
+    # Verdict banner
+    VERDICT_CONFIG = {
+        "CLEAR": ("verdict-clear", "✅ CLEAR — Approve for Payment"),
+        "FLAG_FOR_REVIEW": ("verdict-flag", "⚠️ FLAG FOR REVIEW — Hold Claim"),
+        "ESCALATE": ("verdict-escalate", "🚨 ESCALATE — Refer to SIU"),
+        "UNKNOWN": ("metric-box", "❓ Verdict Undetermined"),
+    }
+    css_class, label = VERDICT_CONFIG[verdict]
+    st.markdown(f'<div class="{css_class}">{label}</div>', unsafe_allow_html=True)
+    st.markdown("")
+    # Metrics row
+    m1, m2, m3, m4 = st.columns(4)
+    m1.metric("Claim ID", claim_id)
+    m2.metric("Beneficiary", beneficiary_id)
+    m3.metric("Claim Amount", f"${float(claim_amount.replace(',','')):.2f}")
+    m4.metric("Verdict", verdict)
+    st.divider()
+    # Full investigation report
+    st.subheader("📄 Full Investigation Report")
+    st.markdown(final_text)
 
 # ══════════════════════════════════════════════════════════════════════════════
 # FOOTER
