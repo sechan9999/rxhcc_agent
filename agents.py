@@ -219,31 +219,17 @@ Claim Amount:    $8,400.00
 Date of Service: 2024-11-15
 """
 
-# Unified test block after resolving merge conflict
-# Async test runner for CLI debugging
-async def run_test():
-    # Ensure DEMO_MODE environment variable is set (defaults to "0")
-    os.environ["DEMO_MODE"] = os.getenv("DEMO_MODE", "0")
-    runner, svc = create_runner()
-    session = await svc.create_session(app_name="rxhcc_fwa_agent", user_id="test_user")
-    events = runner.run(
-        user_id="test_user",
-        session_id=session.id,
-        new_message=types.Content(
-            role="user",
-            parts=[types.Part(text=TEST_CLAIM)],
-        ),
-    )
-    for event in events:
-        if event.is_final_response():
-            # Safely extract final response text
-            if hasattr(event, "content") and event.content and getattr(event.content, "parts", None):
-                part = event.content.parts[0]
-                if hasattr(part, "text") and part.text:
-                    print(part.text)
-                else:
-                    print("[No text in final response]")
-            else:
-                print("[Final response missing content]")
-
-asyncio.run(run_test())
+    # Set demo mode environment variable for testing
+    os.environ["DEMO_MODE"] = os.getenv("DEMO_MODE", "1")
+    
+    print("Running FWA Investigation test...")
+    logs = []
+    try:
+        report = run_fwa_investigation(TEST_CLAIM, logs)
+        print("\n=== Investigation Report ===")
+        print(report)
+        print("\n=== Logs ===")
+        for log in logs:
+            print(log)
+    except Exception as e:
+        print(f"Error executing investigation: {e}")
