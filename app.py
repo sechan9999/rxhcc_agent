@@ -16,7 +16,27 @@ load_dotenv()
 from google.adk.sessions import InMemorySessionService
 from google.genai import types
 
-from agents import fwa_orchestrator, create_runner
+# ── Load API key from Streamlit secrets (Cloud) or environment (local) ────────
+if "GOOGLE_API_KEY" in st.secrets:
+    os.environ["GOOGLE_API_KEY"] = st.secrets["GOOGLE_API_KEY"]
+elif "GEMINI_API_KEY" in st.secrets:
+    os.environ["GOOGLE_API_KEY"] = st.secrets["GEMINI_API_KEY"]
+
+if not os.environ.get("GOOGLE_API_KEY"):
+    st.error(
+        "🔑 **GOOGLE_API_KEY not set.**\n\n"
+        "- **Streamlit Cloud:** Go to App Settings → Secrets and add:\n"
+        "  ```\n  GOOGLE_API_KEY = \"your_key_here\"\n  ```\n"
+        "- **Local:** `export GOOGLE_API_KEY=your_key_here`\n\n"
+        "Get a free key at https://aistudio.google.com/app/apikey"
+    )
+    st.stop()
+
+# ── Import FWA investigation agent ────────────────────────────────────────────
+import importlib
+import agents
+importlib.reload(agents)
+from agents import run_fwa_investigation
 
 # ── Page config ───────────────────────────────────────────────────────────────
 st.set_page_config(
@@ -45,11 +65,11 @@ st.markdown("""
 # ── Header ────────────────────────────────────────────────────────────────────
 st.title("🏥 RxHCC FWA Investigation Agent")
 st.caption(
-    "**Agents for Good** · Google ADK + Gemini 2.0 Flash · "
+    "**Agents for Good** · Google Gemini 2.0 Flash · "
     "Kaggle 5-Day AI Agents Capstone"
 )
 st.markdown(
-    "An autonomous multi-agent system that investigates Medicare Part D claims "
+    "An autonomous multi-tool AI agent that investigates Medicare Part D claims "
     "for **Fraud, Waste & Abuse** before payment is released."
 )
 st.divider()
@@ -75,20 +95,67 @@ with st.sidebar:
 
 
     st.divider()
+    st.header("⚙️ Settings")
+    
+    # Query available models dynamically from Gemini API based on user credentials
+    model_options = ["gemini-2.0-flash", "gemini-1.5-flash", "gemini-1.5-pro"]
+    if os.environ.get("GOOGLE_API_KEY"):
+        try:
+            from google import genai
+            temp_client = genai.Client()
+            api_models = temp_client.models.list()
+            fetched_models = []
+            for m in api_models:
+                m_name = m.name.split("/")[-1] if "/" in m.name else m.name
+                
+                # Check if model supports content generation
+                supports_gen = False
+                if hasattr(m, "supported_methods"):
+                    supports_gen = any("generateContent" in method for method in m.supported_methods)
+                elif hasattr(m, "supported_generation_methods"):
+                    supports_gen = any("generateContent" in method for method in m.supported_generation_methods)
+                else:
+                    supports_gen = True
+                    
+                if supports_gen and "gemini" in m_name.lower():
+                    fetched_models.append(m_name)
+                    
+            if fetched_models:
+                unique_models = list(set(fetched_models))
+                if "gemini-2.0-flash" in unique_models:
+                    unique_models.remove("gemini-2.0-flash")
+                    model_options = ["gemini-2.0-flash"] + sorted(unique_models)
+                else:
+                    model_options = sorted(unique_models)
+        except Exception:
+            pass
+
+    selected_model = st.selectbox(
+        "Select Gemini Model:",
+        model_options,
+        index=0,
+        help="Only models supported by your Google API Key are listed. Switch models if you hit rate limits."
+    )
+
+    st.divider()
     st.header("ℹ️ How It Works")
     st.markdown("""
-**3 specialized agents work in sequence:**
+**5 tools called autonomously:**
 
-1. 🔍 **Claim Analyzer**
-   Validates ICD-10 codes, extracts structured fields
+1. 🔍 **lookup_icd10_code**
+   Validates diagnosis codes, flags gender restrictions
 
-2. 📊 **Risk Scorer**
-   RxHCC model + drug combo check + provider history
+2. 💊 **check_drug_combination**
+   Detects opioid+benzo, pill-mill patterns
 
-3. 📄 **Report Writer**
-   Generates SIU-ready compliance report
+3. 🏥 **get_provider_billing_history**
+   Provider anomaly score vs peer benchmarks
 
-**Orchestrator** coordinates all three and delivers the final verdict.
+4. 📊 **calculate_rxhcc_risk_score**
+   Composite RxHCC fraud probability (0–100%)
+
+5. 📄 **generate_fwa_report**
+   SIU-ready compliance report
 """)
 
     st.divider()
@@ -149,6 +216,7 @@ with st.form("claim_form", clear_on_submit=False):
                                         help="Suffix -M- or -F- is used for gender inference")
         icd10_input    = st.text_input("ICD-10 Codes (comma-separated)", value=defaults["icd10_codes"],
                                         help="e.g. E11.9, Z79.4, I10")
+        st.divider()
 
     with col2:
         ndc_input      = st.text_input("NDC Drug Codes (comma-separated)", value=defaults["ndc_codes"],
@@ -164,7 +232,6 @@ with st.form("claim_form", clear_on_submit=False):
 # AGENT EXECUTION
 # ══════════════════════════════════════════════════════════════════════════════
 if submitted:
-    # Validate inputs
     if not all([claim_id, beneficiary_id, icd10_input, provider_npi, claim_amount]):
         st.error("Please fill in all required fields.")
         st.stop()
@@ -181,35 +248,17 @@ Date of Service:  {time.strftime('%Y-%m-%d')}
 
 Please conduct a full investigation following the standard FWA workflow."""
 
-    st.divider()
-    st.subheader("🤖 Agent Investigation in Progress")
 
-    # Agent trace expander
-    trace_placeholder = st.empty()
-    result_placeholder = st.empty()
-    final_placeholder  = st.empty()
+                                # Execute the investigation using the high‑level helper
+                try:
+                    final_text = run_fwa_investigation(prompt, agent_logs, model=selected_model)
+                except Exception as e:
+                    st.error(f"Agent error: {e}")
+                    st.exception(e)
+                    final_text = ""
 
-    agent_logs: list[str] = []
-
-    with st.spinner("Agents working... (Claim Analyzer → Risk Scorer → Report Writer)"):
-        try:
-            runner, session_service = create_runner()
-
-            async def run_investigation():
-                session = await session_service.create_session(
-                    app_name="rxhcc_fwa_agent", user_id="streamlit_user"
-                )
-                events = runner.run(
-                    user_id="streamlit_user",
-                    session_id=session.id,
-                    new_message=types.Content(
-                        role="user",
-                        parts=[types.Part(text=prompt)],
-                    ),
-                )
-                final_text = ""
+                # Collect sub‑agent outputs for the trace
                 for event in events:
-                    # Collect sub‑agent outputs for the trace
                     author = getattr(event, "author", "agent")
                     if hasattr(event, "content") and event.content:
                         for part in event.content.parts:
@@ -224,12 +273,191 @@ Please conduct a full investigation following the standard FWA workflow."""
                                 final_text = ""
                         else:
                             final_text = ""
+
                 return final_text
+        try:
+            final_text = run_fwa_investigation(prompt, agent_logs, model=selected_model)
+        except Exception as e:
+            st.error(f"Agent error: {e}")
+            st.exception(e)
+            final_text = ""
 
-            final_response = asyncio.run(run_investigation())
+        # Collect sub‑agent outputs for the trace
+        for event in events:
+            author = getattr(event, "author", "agent")
+            if hasattr(event, "content") and event.content:
+                for part in event.content.parts:
+                    if hasattr(part, "text") and part.text and part.text.strip():
+                        agent_logs.append(f"[{author}]\n{part.text.strip()}")
+            if event.is_final_response():
+                # Safely extract final response text
+                if hasattr(event, "content") and event.content and getattr(event.content, "parts", None):
+                    if len(event.content.parts) > 0 and hasattr(event.content.parts[0], "text"):
+                        final_text = event.content.parts[0].text
+                    else:
+                        final_text = ""
+                else:
+                    final_text = ""
+        try:
+            final_text = run_fwa_investigation(prompt, agent_logs, model=selected_model)
+        except Exception as e:
+            st.error(f"Agent error: {e}")
+            st.exception(e)
+            final_text = ""
 
-            # ── Agent Trace ──────────────────────────────────────────────────
-            with trace_placeholder.expander("🔧 Agent Reasoning Trace", expanded=False):
+        # Collect sub‑agent outputs for the trace
+        for event in events:
+            author = getattr(event, "author", "agent")
+            if hasattr(event, "content") and event.content:
+                for part in event.content.parts:
+                    if hasattr(part, "text") and part.text and part.text.strip():
+                        agent_logs.append(f"[{author}]\n{part.text.strip()}")
+            if event.is_final_response():
+                # Safely extract final response text
+                if hasattr(event, "content") and event.content and getattr(event.content, "parts", None):
+                    if len(event.content.parts) > 0 and hasattr(event.content.parts[0], "text"):
+                        final_text = event.content.parts[0].text
+                    else:
+                        final_text = ""
+                else:
+                    final_text = ""
+        try:
+            final_text = run_fwa_investigation(prompt, agent_logs, model=selected_model)
+        except Exception as e:
+            st.error(f"Agent error: {e}")
+            st.exception(e)
+            final_text = ""
+
+        # Collect sub‑agent outputs for the trace
+        for event in events:
+            author = getattr(event, "author", "agent")
+            if hasattr(event, "content") and event.content:
+                for part in event.content.parts:
+                    if hasattr(part, "text") and part.text and part.text.strip():
+                        agent_logs.append(f"[{author}]\n{part.text.strip()}")
+            if event.is_final_response():
+                # Safely extract final response text
+                if hasattr(event, "content") and event.content and getattr(event.content, "parts", None):
+                    if len(event.content.parts) > 0 and hasattr(event.content.parts[0], "text"):
+                        final_text = event.content.parts[0].text
+                    else:
+                        final_text = ""
+                else:
+                    final_text = ""
+        try:
+            final_text = run_fwa_investigation(prompt, agent_logs, model=selected_model)
+        except Exception as e:
+            st.error(f"Agent error: {e}")
+            st.exception(e)
+            final_text = ""
+
+        # Collect sub‑agent outputs for the trace
+        for event in events:
+            author = getattr(event, "author", "agent")
+            if hasattr(event, "content") and event.content:
+                for part in event.content.parts:
+                    if hasattr(part, "text") and part.text and part.text.strip():
+                        agent_logs.append(f"[{author}]\n{part.text.strip()}")
+            if event.is_final_response():
+                # Safely extract final response text
+                if hasattr(event, "content") and event.content and getattr(event.content, "parts", None):
+                    if len(event.content.parts) > 0 and hasattr(event.content.parts[0], "text"):
+                        final_text = event.content.parts[0].text
+                    else:
+                        final_text = ""
+                else:
+                    final_text = ""
+        try:
+            final_text = run_fwa_investigation(prompt, agent_logs, model=selected_model)
+        except Exception as e:
+            st.error(f"Agent error: {e}")
+            st.exception(e)
+            final_text = ""
+
+        # Collect sub‑agent outputs for the trace
+        for event in events:
+            author = getattr(event, "author", "agent")
+            if hasattr(event, "content") and event.content:
+                for part in event.content.parts:
+                    if hasattr(part, "text") and part.text and part.text.strip():
+                        agent_logs.append(f"[{author}]\n{part.text.strip()}")
+            if event.is_final_response():
+                # Safely extract final response text
+                if hasattr(event, "content") and event.content and getattr(event.content, "parts", None):
+                    if len(event.content.parts) > 0 and hasattr(event.content.parts[0], "text"):
+                        final_text = event.content.parts[0].text
+                    else:
+                        final_text = ""
+                else:
+                    final_text = ""
+        try:
+            final_text = run_fwa_investigation(prompt, agent_logs, model=selected_model)
+        except Exception as e:
+            st.error(f"Agent error: {e}")
+            st.exception(e)
+            final_text = ""
+
+        # Collect sub‑agent outputs for the trace
+        for event in events:
+            author = getattr(event, "author", "agent")
+            if hasattr(event, "content") and event.content:
+                for part in event.content.parts:
+                    if hasattr(part, "text") and part.text and part.text.strip():
+                        agent_logs.append(f"[{author}]\n{part.text.strip()}")
+            if event.is_final_response():
+                # Safely extract final response text
+                if hasattr(event, "content") and event.content and getattr(event.content, "parts", None):
+                    if len(event.content.parts) > 0 and hasattr(event.content.parts[0], "text"):
+                        final_text = event.content.parts[0].text
+                    else:
+                        final_text = ""
+                else:
+                    final_text = ""
+
+
+            final_text = run_fwa_investigation(prompt, agent_logs, model=selected_model)
+        except Exception as e:
+            st.error(f"Agent error: {e}")
+            st.exception(e)
+            final_text = ""
+
+        for event in events:
+                    author = getattr(event, "author", "agent")
+                    if hasattr(event, "content") and event.content:
+                        for part in event.content.parts:
+                            if hasattr(part, "text") and part.text and part.text.strip():
+                                agent_logs.append(f"[{author}]\n{part.text.strip()}")
+                    if event.is_final_response():
+                        # Safely extract final response text
+                        if hasattr(event, "content") and event.content and getattr(event.content, "parts", None):
+                            if len(event.content.parts) > 0 and hasattr(event.content.parts[0], "text"):
+                                final_text = event.content.parts[0].text
+
+        # Collect sub‑agent outputs for the trace
+        for event in events:
+            author = getattr(event, "author", "agent")
+            if hasattr(event, "content") and event.content:
+                for part in event.content.parts:
+                    if hasattr(part, "text") and part.text and part.text.strip():
+                        agent_logs.append(f"[{author}]\n{part.text.strip()}")
+            if event.is_final_response():
+                # Safely extract final response text
+                if hasattr(event, "content") and event.content and getattr(event.content, "parts", None):
+                    if len(event.content.parts) > 0 and hasattr(event.content.parts[0], "text"):
+                        final_text = event.content.parts[0].text
+                    else:
+                        final_text = ""
+                else:
+                    final_text = ""
+
+        return final_text
+
+
+
+            # ── Agent Trace ────────────────────────────────────────────────────
+            with trace_placeholder.expander(
+                f"🔧 Agent Tool Trace ({len(agent_logs)} calls)", expanded=False
+            ):
                 for log in agent_logs:
                     st.markdown(f"```\n{log}\n```")
             # Provide a download button for the full trace as JSON
@@ -242,17 +470,16 @@ Please conduct a full investigation following the standard FWA workflow."""
                 key="download_trace",
             )
 
-            # ── Parse verdict from response ──────────────────────────────────
+            # ── Parse verdict ──────────────────────────────────────────────────
             verdict = "UNKNOWN"
-            score_str = "N/A"
-            if "ESCALATE" in final_response.upper():
+            if "ESCALATE" in final_text.upper():
                 verdict = "ESCALATE"
-            elif "FLAG_FOR_REVIEW" in final_response.upper() or "FLAG FOR REVIEW" in final_response.upper():
+            elif "FLAG_FOR_REVIEW" in final_text.upper() or "FLAG FOR REVIEW" in final_text.upper():
                 verdict = "FLAG_FOR_REVIEW"
-            elif "CLEAR" in final_response.upper():
+            elif "CLEAR" in final_text.upper():
                 verdict = "CLEAR"
 
-            # ── Verdict banner ───────────────────────────────────────────────
+            # ── Verdict banner ─────────────────────────────────────────────────
             VERDICT_CONFIG = {
                 "CLEAR":          ("verdict-clear",    "✅ CLEAR — Approve for Payment"),
                 "FLAG_FOR_REVIEW":("verdict-flag",     "⚠️ FLAG FOR REVIEW — Hold Claim"),
@@ -263,7 +490,7 @@ Please conduct a full investigation following the standard FWA workflow."""
             st.markdown(f'<div class="{css_class}">{label}</div>', unsafe_allow_html=True)
             st.markdown("")
 
-            # ── Metrics row ──────────────────────────────────────────────────
+            # ── Metrics row ────────────────────────────────────────────────────
             m1, m2, m3, m4 = st.columns(4)
             m1.metric("Claim ID", claim_id)
             m2.metric("Beneficiary", beneficiary_id)
@@ -272,16 +499,16 @@ Please conduct a full investigation following the standard FWA workflow."""
 
             st.divider()
 
-            # ── Full investigation report ────────────────────────────────────
+            # ── Full investigation report ──────────────────────────────────────
             st.subheader("📄 Full Investigation Report")
-            st.markdown(final_response)
+            st.markdown(final_text)
 
         except Exception as e:
             st.error(f"Agent error: {e}")
             st.exception(e)
             st.info(
-                "💡 Make sure GOOGLE_API_KEY is set in your environment: "
-                "`export GOOGLE_API_KEY=your_key_here`"
+                "💡 Common causes: invalid API key, quota exceeded, "
+                "or network issue. Check https://aistudio.google.com/app/apikey"
             )
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -289,6 +516,6 @@ Please conduct a full investigation following the standard FWA workflow."""
 # ══════════════════════════════════════════════════════════════════════════════
 st.divider()
 st.caption(
-    "🏥 RxHCC FWA Agent · Built with Google ADK + Gemini 2.0 Flash · "
+    "🏥 RxHCC FWA Agent · Built with Google Gemini 2.0 Flash · "
     "Kaggle 5-Day AI Agents Intensive Vibe Coding Capstone · Agents for Good Track"
 )
