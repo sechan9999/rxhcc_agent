@@ -5,10 +5,14 @@ Kaggle Capstone: 5-Day AI Agents Intensive Vibe Coding (Agents for Good)
 Run:  streamlit run app.py
 """
 
-import asyncio
 import os
+import asyncio
+import json
 import time
 import streamlit as st
+from dotenv import load_dotenv
+
+load_dotenv()
 from google.adk.sessions import InMemorySessionService
 from google.genai import types
 
@@ -64,6 +68,11 @@ with st.sidebar:
         ],
         index=0,
     )
+    # Demo mode toggle – when enabled, tools use mock data (handled inside tools.py)
+    demo_mode = st.checkbox("🧪 Demo mode (use mock data)", value=True, help="When enabled, the agent runs against simulated data for faster demos.")
+    if demo_mode:
+        st.info("Demo mode is ON: tool calls will return simulated responses.")
+
 
     st.divider()
     st.header("ℹ️ How It Works")
@@ -200,14 +209,21 @@ Please conduct a full investigation following the standard FWA workflow."""
                 )
                 final_text = ""
                 for event in events:
-                    # Collect sub-agent outputs for the trace
+                    # Collect sub‑agent outputs for the trace
                     author = getattr(event, "author", "agent")
                     if hasattr(event, "content") and event.content:
                         for part in event.content.parts:
                             if hasattr(part, "text") and part.text and part.text.strip():
                                 agent_logs.append(f"[{author}]\n{part.text.strip()}")
                     if event.is_final_response():
-                        final_text = event.content.parts[0].text
+                        # Safely extract final response text
+                        if hasattr(event, "content") and event.content and getattr(event.content, "parts", None):
+                            if len(event.content.parts) > 0 and hasattr(event.content.parts[0], "text"):
+                                final_text = event.content.parts[0].text
+                            else:
+                                final_text = ""
+                        else:
+                            final_text = ""
                 return final_text
 
             final_response = asyncio.run(run_investigation())
@@ -216,6 +232,15 @@ Please conduct a full investigation following the standard FWA workflow."""
             with trace_placeholder.expander("🔧 Agent Reasoning Trace", expanded=False):
                 for log in agent_logs:
                     st.markdown(f"```\n{log}\n```")
+            # Provide a download button for the full trace as JSON
+            trace_json = json.dumps(agent_logs, indent=2)
+            st.download_button(
+                label="Download Trace JSON",
+                data=trace_json,
+                file_name="agent_trace.json",
+                mime="application/json",
+                key="download_trace",
+            )
 
             # ── Parse verdict from response ──────────────────────────────────
             verdict = "UNKNOWN"

@@ -270,6 +270,11 @@ Date of Service: 2024-11-15
 """
 
     async def run_test():
+        # Respect demo mode: set environment variable for downstream tools if needed
+        if demo_mode:
+            os.environ["DEMO_MODE"] = "1"
+        else:
+            os.environ["DEMO_MODE"] = "0"
         runner, svc = create_runner()
         session = await svc.create_session(app_name="rxhcc_fwa_agent", user_id="test_user")
         events = runner.run(
@@ -282,6 +287,14 @@ Date of Service: 2024-11-15
         )
         for event in events:
             if event.is_final_response():
-                print(event.content.parts[0].text)
+                # Safely extract final response text; some events may have empty content
+                if hasattr(event, "content") and event.content and getattr(event.content, "parts", None):
+                    part = event.content.parts[0]
+                    if hasattr(part, "text") and part.text:
+                        print(part.text)
+                    else:
+                        print("[No text in final response]")
+                else:
+                    print("[Final response missing content]")
 
     asyncio.run(run_test())
