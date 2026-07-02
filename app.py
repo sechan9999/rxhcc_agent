@@ -25,14 +25,9 @@ if secret_key:
     os.environ["GOOGLE_API_KEY"] = secret_key
 
 if not os.environ.get("GOOGLE_API_KEY"):
-    st.error(
-        "🔑 **GOOGLE_API_KEY not set.**\n\n"
-        "- **Streamlit Cloud:** Go to App Settings → Secrets and add:\n"
-        "  ```\n  GOOGLE_API_KEY = \"your_key_here\"\n  ```\n"
-        "- **Local:** `export GOOGLE_API_KEY=your_key_here`\n\n"
-        "Get a free key at https://aistudio.google.com/app/apikey"
+    st.warning(
+        "🔑 **GOOGLE_API_KEY not set.**\n\n- The app will operate in **demo mode only**. To enable real Gemini calls, add a secret in Streamlit Cloud Settings → Secrets."
     )
-    st.stop()
 
 # ── Import FWA investigation agent ────────────────────────────────────────────
 import importlib
@@ -57,6 +52,8 @@ st.markdown(
     .verdict-escalate { background:#f8d7da; color:#721c24; padding:12px 18px; border-radius:8px; font-weight:bold; font-size:1.1rem; }
     .metric-box       { background:#f8f9fa; border:1px solid #dee2e6; border-radius:8px; padding:14px; text-align:center; }
     .agent-trace      { background:#1e1e2e; color:#cdd6f4; font-family:monospace; font-size:0.82rem; padding:12px; border-radius:6px; }
+    .report-section   { font-size:18px; line-height:1.6; }
+    div[data-testid="stMarkdown"] { font-size: 1.05rem; }
     </style>
     """,
     unsafe_allow_html=True,
@@ -91,6 +88,29 @@ with st.sidebar:
     demo_mode = st.checkbox("🧪 Demo mode (use mock data)", value=True, help="When enabled, the agent runs against simulated data for faster demos.")
     if demo_mode:
         st.info("Demo mode is ON: tool calls will return simulated responses.")
+
+    st.divider()
+
+    st.markdown("**Navigation**")
+    st.markdown(
+        """
+    1. Sample Scenarios  
+    2. Settings  
+    3. How It Works  
+    4. Impact  
+    5. Investigation Report  
+    """
+    )
+    
+    # Interactive navigation (select box)
+    nav_step = st.sidebar.selectbox(
+        "Go to step",
+        ["Sample Scenarios", "Settings", "How It Works", "Impact", "Investigation Report"],
+        index=0,
+        help="Select a step to jump to its section in the main view"
+    )
+    st.session_state.nav_step = nav_step
+
     st.divider()
     st.header("⚙️ Settings")
     model_options = ["gemini-2.0-flash", "gemini-1.5-flash", "gemini-1.5-pro"]
@@ -130,11 +150,11 @@ with st.sidebar:
         """
         **5 tools called autonomously:**
 
-        1. 🔍 **lookup_icd10_code**\n   Validates diagnosis codes, flags gender restrictions
-        2. 💊 **check_drug_combination**\n   Detects opioid+benzo, pill-mill patterns
-        3. 🏥 **get_provider_billing_history**\n   Provider anomaly score vs peer benchmarks
-        4. 📊 **calculate_rxhcc_risk_score**\n   Composite RxHCC fraud probability (0–100%)
-        5. 📄 **generate_fwa_report**\n   SIU-ready compliance report
+        1. 🔍 **lookup_icd10_code**
+        2. 💊 **check_drug_combination**
+        3. 🏥 **get_provider_billing_history**
+        4. 📊 **calculate_rxhcc_risk_score**
+        5. 📄 **generate_fwa_report**
         """
     )
     st.divider()
@@ -277,7 +297,7 @@ if submitted:
     st.divider()
     # Full investigation report
     st.subheader("📄 Full Investigation Report")
-    st.markdown(final_text)
+    st.markdown(f"<div class='report-section'>{final_text}</div>", unsafe_allow_html=True)
 
 # ══════════════════════════════════════════════════════════════════════════════
 # FOOTER
