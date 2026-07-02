@@ -10,7 +10,6 @@ import streamlit as st
 from dotenv import load_dotenv
 
 load_dotenv()
-from google.adk.sessions import InMemorySessionService
 from google.genai import types
 
 # ── Load API key from Streamlit secrets (Cloud) or environment (local) ────────
