@@ -1,46 +1,68 @@
 [
   {
-    "scenario": "Clean — Diabetic Maintenance",
+    "scenario": "✅ Clean — Type 2 Diabetic Maintenance",
     "expected_verdict": "CLEAR",
-    "claim_id": "CLM-2024-001",
+    "claim_id": "CLM-2026-001",
     "beneficiary_id": "BNF-F-99211",
     "icd10_codes": ["E11.9", "Z79.4"],
-    "ndc_codes": ["00002143480"],
-    "provider_npi": "1111111111",
-    "claim_amount": 320.00,
-    "notes": "Routine insulin prescription for Type 2 diabetes. All codes valid, no red flags."
+    "ndc_codes": ["00002143380", "00002143480"],
+    "provider_npi": "1122334455",
+    "claim_amount": 245.00,
+    "notes": "Routine Metformin + Lantus insulin maintenance for compliant female T2D patient. Verified PCP, no billing anomalies."
   },
   {
-    "scenario": "Suspicious — Opioid/Benzo Combination",
-    "expected_verdict": "FLAG_FOR_REVIEW or ESCALATE",
-    "claim_id": "CLM-2024-002",
+    "scenario": "⚠️ Flag — High-Dose Opioid with Regional Pharmacy Outlier",
+    "expected_verdict": "FLAG_FOR_REVIEW",
+    "claim_id": "CLM-2026-002",
     "beneficiary_id": "BNF-M-44831",
-    "icd10_codes": ["G89.29", "F11.10"],
-    "ndc_codes": ["00406051201", "59011049010"],
+    "icd10_codes": ["G89.29"],
+    "ndc_codes": ["00406051201"],
     "provider_npi": "9876543210",
     "claim_amount": 1250.00,
-    "notes": "OxyContin 80mg + Alprazolam 2mg co-prescribed. Opioid + benzo combo has FDA Black Box warning. Provider is a flagged pharmacy."
+    "notes": "Chronic pain claim billed for OxyContin 80mg via high-volume specialty pharmacy. 30-day documentation hold required."
   },
   {
-    "scenario": "Escalate — Gender Mismatch + High-Risk Provider",
+    "scenario": "🚨 Escalate — Pill Mill Holy Trinity (Oxy + Xanax + Soma)",
     "expected_verdict": "ESCALATE",
-    "claim_id": "CLM-2024-003",
+    "claim_id": "CLM-2026-003",
     "beneficiary_id": "BNF-M-77542",
-    "icd10_codes": ["C50.911", "E11.9"],
+    "icd10_codes": ["G89.29", "F11.10"],
     "ndc_codes": ["00406051201", "59011049010", "65162010850"],
     "provider_npi": "1234567890",
     "claim_amount": 8400.00,
-    "notes": "MALE beneficiary billed for female breast cancer (C50.911). Plus opioid+benzo+soma 'holy trinity' from a top-1% opioid prescriber. Multiple ESCALATE triggers."
+    "notes": "Lethal controlled substance triad (Oxycodone + Alprazolam + Carisoprodol) from a top-1% outlier pain clinic with cash-dispense flags."
   },
   {
-    "scenario": "Upcoding Attempt — High Severity Mismatch",
-    "expected_verdict": "FLAG_FOR_REVIEW",
-    "claim_id": "CLM-2024-004",
-    "beneficiary_id": "BNF-F-55103",
-    "icd10_codes": ["N18.6", "I50.9"],
-    "ndc_codes": ["00088502905"],
-    "provider_npi": "2222222222",
-    "claim_amount": 6200.00,
-    "notes": "End-stage renal disease + heart failure (both severity 4-5) billed with only Ozempic. Diagnosis-drug mismatch. Claim amount far above expected."
+    "scenario": "🚨 Escalate — GLP-1 Off-Label Weight Loss Scheme",
+    "expected_verdict": "ESCALATE",
+    "claim_id": "CLM-2026-004",
+    "beneficiary_id": "BNF-F-66291",
+    "icd10_codes": ["I10"],
+    "ndc_codes": ["00169406012"],
+    "provider_npi": "1928374650",
+    "claim_amount": 1680.00,
+    "notes": "High-cost Ozempic billed under Essential Hypertension (I10) without Type 2 Diabetes or Obesity diagnosis by an aesthetic clinic."
+  },
+  {
+    "scenario": "🚨 Escalate — Uncomplicated Diabetes HCC Upcoding",
+    "expected_verdict": "ESCALATE",
+    "claim_id": "CLM-2026-005",
+    "beneficiary_id": "BNF-M-33104",
+    "icd10_codes": ["E11.9", "HCC18"],
+    "ndc_codes": ["00002143380"],
+    "provider_npi": "9876543210",
+    "claim_amount": 3450.00,
+    "notes": "Uncomplicated diabetes (E11.9 / HCC19) artificially upcoded to HCC18 with inflated fees to maximize CMS risk-adjustment capitation."
+  },
+  {
+    "scenario": "🚨 Escalate — Gender Incongruence & Mutual Exclusion",
+    "expected_verdict": "ESCALATE",
+    "claim_id": "CLM-2026-006",
+    "beneficiary_id": "BNF-M-88421",
+    "icd10_codes": ["C50.911", "E10.9", "E11.9"],
+    "ndc_codes": ["00002143480"],
+    "provider_npi": "1122334455",
+    "claim_amount": 4200.00,
+    "notes": "Male patient billed with female breast neoplasm (C50.911) plus contradictory Type 1 and Type 2 diabetes diagnoses on same claim."
   }
 ]
