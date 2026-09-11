@@ -123,6 +123,7 @@ def run_fwa_investigation(
         # Step 1: Validate ICD-10 codes
         icd10_results = []
         for code in icd10_codes:
+            time.sleep(0.05)
             agent_logs.append({
                 "type": "tool_call",
                 "tool": "lookup_icd10_code",
@@ -139,6 +140,7 @@ def run_fwa_investigation(
             })
 
         # Step 2: Check drug combination
+        time.sleep(0.05)
         agent_logs.append({
             "type": "tool_call",
             "tool": "check_drug_combination",
@@ -154,6 +156,7 @@ def run_fwa_investigation(
         })
 
         # Step 3: Pull provider billing history
+        time.sleep(0.05)
         agent_logs.append({
             "type": "tool_call",
             "tool": "get_provider_billing_history",
@@ -169,6 +172,7 @@ def run_fwa_investigation(
         })
 
         # Step 4: Calculate composite risk score
+        time.sleep(0.05)
         agent_logs.append({
             "type": "tool_call",
             "tool": "calculate_rxhcc_risk_score",

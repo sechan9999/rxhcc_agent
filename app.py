@@ -35,6 +35,7 @@ from tools import (
     NDC_DB,
     PROVIDER_DB,
     CONFLICT_RULES,
+    get_provider_billing_history,
     generate_synthetic_claims_batch,
     evaluate_claims_batch,
 )
@@ -63,7 +64,7 @@ st.markdown(
     }
     .metric-card h3 {
         margin: 0;
-        font-size: 1.8rem;
+        font-size: 1.7rem;
         font-weight: 700;
         color: #38bdf8;
     }
@@ -107,19 +108,31 @@ st.markdown(
         margin-bottom: 15px;
     }
 
-    /* Tool Call Trace Badges */
-    .trace-card {
-        background: #1e1e2e;
-        border: 1px solid #313244;
+    /* Provider Preview Card */
+    .provider-card {
+        background: #1e293b;
+        border: 1px solid #475569;
         border-radius: 8px;
-        padding: 12px;
-        margin-bottom: 10px;
-        font-family: ui-monospace, monospace;
-        font-size: 0.85rem;
+        padding: 12px 16px;
+        margin-top: 10px;
+        font-size: 0.9rem;
     }
-    .badge-clear { background-color: #10b981; color: white; padding: 3px 8px; border-radius: 6px; font-weight: bold; }
-    .badge-flag { background-color: #f59e0b; color: white; padding: 3px 8px; border-radius: 6px; font-weight: bold; }
-    .badge-escalate { background-color: #ef4444; color: white; padding: 3px 8px; border-radius: 6px; font-weight: bold; }
+
+    /* Risk Score Gauge Bar */
+    .gauge-container {
+        width: 100%;
+        background-color: #334155;
+        border-radius: 10px;
+        height: 22px;
+        overflow: hidden;
+        margin: 10px 0;
+        position: relative;
+    }
+    .gauge-fill {
+        height: 100%;
+        transition: width 0.6s ease-in-out;
+        border-radius: 10px;
+    }
     </style>
     """,
     unsafe_allow_html=True,
@@ -146,7 +159,6 @@ def discover_models() -> list[str]:
             if "gemini" not in lname or any(marker in lname for marker in NON_TEXT_MARKERS):
                 continue
             names.append(name)
-        # Prioritize 2.0/2.5 flash
         priority = ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-flash-latest", "gemini-2.5-pro"]
         ordered = [p for p in priority if p in names]
         for n in sorted(names):
@@ -183,6 +195,33 @@ def load_scenarios():
 
 
 SCENARIOS = load_scenarios()
+scenario_keys = list(SCENARIOS.keys())
+
+# ── Session State Management for Synced Inputs ─────────────────────────────────
+if "active_scenario" not in st.session_state:
+    st.session_state["active_scenario"] = scenario_keys[0] if scenario_keys else ""
+    first_sc = SCENARIOS.get(st.session_state["active_scenario"], {})
+    st.session_state["claim_id_val"] = first_sc.get("claim_id", "CLM-2026-001")
+    st.session_state["ben_id_val"] = first_sc.get("beneficiary_id", "BNF-F-99211")
+    st.session_state["icd_val"] = first_sc.get("icd10_codes", "E11.9, Z79.4")
+    st.session_state["ndc_val"] = first_sc.get("ndc_codes", "00002143380, 00002143480")
+    st.session_state["npi_val"] = first_sc.get("provider_npi", "1122334455")
+    st.session_state["amt_val"] = first_sc.get("claim_amount", "245.00")
+
+
+def on_scenario_select():
+    sel = st.session_state.sidebar_scenario_select
+    st.session_state["active_scenario"] = sel
+    if sel in SCENARIOS:
+        sc = SCENARIOS[sel]
+        st.session_state["claim_id_val"] = sc["claim_id"]
+        st.session_state["ben_id_val"] = sc["beneficiary_id"]
+        st.session_state["icd_val"] = sc["icd10_codes"]
+        st.session_state["ndc_val"] = sc["ndc_codes"]
+        st.session_state["npi_val"] = sc["provider_npi"]
+        st.session_state["amt_val"] = sc["claim_amount"]
+        st.session_state.pop("audit_result", None)
+
 
 # ══════════════════════════════════════════════════════════════════════════════
 # SIDEBAR
@@ -194,18 +233,19 @@ with st.sidebar:
     st.divider()
 
     st.subheader("📋 Select Test Scenario")
-    scenario_keys = list(SCENARIOS.keys())
-    selected_scenario_name = st.selectbox(
-        "Load realistic claim:",
+    st.selectbox(
+        "Load vetted clinical claim:",
         scenario_keys,
-        index=0 if scenario_keys else None,
-        help="Quickly populate the claim auditor with vetted clinical Medicare scenarios."
+        index=scenario_keys.index(st.session_state["active_scenario"]) if st.session_state["active_scenario"] in scenario_keys else 0,
+        key="sidebar_scenario_select",
+        on_change=on_scenario_select,
+        help="Instantly loads clinical diagnosis codes, NDC medications, and provider profiles."
     )
 
     demo_mode = st.checkbox(
         "⚡ Fast Demo Mode (Offline Simulation)",
         value=True,
-        help="When checked, runs against the local clinical rule engine — instant, 100% free, and requires no API key."
+        help="When enabled, runs against the local clinical rules engine — instant, deterministic, and 100% free."
     )
 
     if demo_mode:
@@ -213,7 +253,7 @@ with st.sidebar:
     elif HAS_API_KEY:
         st.info("🤖 Live Gemini Agent Mode Active")
     else:
-        st.warning("⚠️ No GOOGLE_API_KEY found. Reverting to Demo Mode.")
+        st.warning("⚠️ No GOOGLE_API_KEY found. Operating in Demo Mode.")
 
     st.divider()
     st.markdown("**System Architecture**")
@@ -245,48 +285,55 @@ tab_audit, tab_batch, tab_rules, tab_roi, tab_settings = st.tabs([
 # TAB 1: REAL-TIME CLAIM AUDITOR
 # ─────────────────────────────────────────────────────────────────────
 with tab_audit:
-    defaults = SCENARIOS.get(selected_scenario_name, {
-        "claim_id": "CLM-2026-001",
-        "beneficiary_id": "BNF-F-99211",
-        "icd10_codes": "E11.9, Z79.4",
-        "ndc_codes": "00002143380, 00002143480",
-        "provider_npi": "1122334455",
-        "claim_amount": "245.00",
-        "note": "Routine diabetic maintenance",
-    })
-
-    if defaults.get("note"):
-        st.info(f"💡 **Scenario Overview:** {defaults['note']}")
+    current_scenario = SCENARIOS.get(st.session_state["active_scenario"], {})
+    if current_scenario.get("note"):
+        st.info(f"💡 **Active Scenario Overview:** {current_scenario['note']}")
 
     with st.form("audit_form", clear_on_submit=False):
         c1, c2 = st.columns(2)
         with c1:
-            claim_id_input = st.text_input("Claim ID", value=defaults["claim_id"])
+            claim_id_input = st.text_input("Claim ID", value=st.session_state["claim_id_val"])
             ben_id_input = st.text_input(
                 "Beneficiary ID",
-                value=defaults["beneficiary_id"],
-                help="CMS Beneficiary identifier. Suffix -M- or -F- indicates gender for clinical incongruence checks.",
+                value=st.session_state["ben_id_val"],
+                help="CMS Beneficiary ID. Suffix -M- or -F- indicates gender for clinical incongruence checks.",
             )
             icd_input = st.text_input(
                 "ICD-10 Diagnosis Codes (comma-separated)",
-                value=defaults["icd10_codes"],
+                value=st.session_state["icd_val"],
                 help="e.g., E11.9, Z79.4, I10, C50.911",
             )
         with c2:
             ndc_input = st.text_input(
                 "NDC Pharmacy Drug Codes (comma-separated)",
-                value=defaults["ndc_codes"],
+                value=st.session_state["ndc_val"],
                 help="11-digit NDC codes (e.g. 00169406012 for Ozempic, 00406051201 for OxyContin)",
             )
             npi_input = st.text_input(
                 "Prescribing Provider NPI",
-                value=defaults["provider_npi"],
+                value=st.session_state["npi_val"],
                 help="10-digit National Provider Identifier (e.g., 1234567890 for Sunshine Pain Clinic)",
             )
             amt_input = st.text_input(
                 "Claim Billed Amount ($)",
-                value=defaults["claim_amount"],
+                value=st.session_state["amt_val"],
                 help="Total billed amount in USD, e.g. 245.00 or 8400.00",
+            )
+
+        # Provider Live Insight Preview
+        p_info = get_provider_billing_history(npi_input)
+        if p_info:
+            p_flags = ", ".join(p_info.get("flags", [])) if p_info.get("flags") else "No adverse flags on file"
+            st.markdown(
+                f"""
+                <div class="provider-card">
+                    🩺 <b>Provider On Record:</b> {p_info['name']} ({p_info['specialty']} — {p_info['state']})<br>
+                    📊 90-Day Volume: <b>{p_info['total_claims_90d']} claims</b> | Peer Rank: <b>{p_info['peer_percentile']}th percentile</b> |
+                    Anomaly Score: <b>{p_info['anomaly_score']:.2f}</b><br>
+                    🚩 <i>Active Risk Signals:</i> {p_flags}
+                </div>
+                """,
+                unsafe_allow_html=True,
             )
 
         submit_audit = st.form_submit_button("⚡ Run Autonomous FWA Investigation", type="primary", use_container_width=True)
@@ -323,7 +370,7 @@ Please conduct a full investigation following the standard FWA workflow."""
                     agent_logs=agent_trace_logs,
                     demo_mode=demo_mode,
                 )
-                elapsed = time.time() - start_t
+                elapsed = max(time.time() - start_t, 0.25)
         except Exception as e:
             st.error(f"Investigation execution failed: {e}")
             st.stop()
@@ -338,11 +385,26 @@ Please conduct a full investigation following the standard FWA workflow."""
         elif "CLEAR" in rep_upper:
             verdict = "CLEAR"
 
+        # Parse score
+        score_val = 0.0
+        for line in final_report_text.split("\n"):
+            if "Score" in line and "%" in line:
+                try:
+                    pct_str = line.split(":", 1)[1].replace("%", "").strip()
+                    score_val = float(pct_str) / 100.0
+                    break
+                except Exception:
+                    pass
+
+        if score_val == 0.0:
+            score_val = 0.85 if verdict == "ESCALATE" else (0.45 if verdict == "FLAG_FOR_REVIEW" else 0.05)
+
         st.session_state["audit_result"] = {
             "claim_id": claim_id_input,
             "beneficiary_id": ben_id_input,
             "claim_amount": clean_amt,
             "verdict": verdict,
+            "score": score_val,
             "final_text": final_report_text,
             "trace_logs": agent_trace_logs,
             "elapsed_seconds": elapsed,
@@ -352,6 +414,7 @@ Please conduct a full investigation following the standard FWA workflow."""
     if "audit_result" in st.session_state:
         res = st.session_state["audit_result"]
         v = res["verdict"]
+        score = res["score"]
 
         st.divider()
         st.subheader("📋 Investigation Findings & Compliance Decision")
@@ -375,6 +438,29 @@ Please conduct a full investigation following the standard FWA workflow."""
                 f'<span style="font-size:0.95rem; font-weight:normal;">Severe Fraud, Waste & Abuse signals detected for Claim {res["claim_id"]} (Potential False Claims Act violation).</span></div>',
                 unsafe_allow_html=True,
             )
+
+        # Visual Risk Gauge Meter
+        gauge_color = "#10b981" if v == "CLEAR" else ("#f59e0b" if v == "FLAG_FOR_REVIEW" else "#ef4444")
+        st.markdown(
+            f"""
+            <div style="margin: 15px 0;">
+                <div style="display:flex; justify-content:space-between; font-size:0.85rem; font-weight:600;">
+                    <span>Composite Fraud Risk Score: {score:.0%}</span>
+                    <span style="color:{gauge_color};">{v}</span>
+                </div>
+                <div class="gauge-container">
+                    <div class="gauge-fill" style="width: {score * 100}%; background-color: {gauge_color};"></div>
+                </div>
+                <div style="display:flex; justify-content:space-between; font-size:0.75rem; color:#94a3b8;">
+                    <span>0% (Clear)</span>
+                    <span>30% (Review Threshold)</span>
+                    <span>70% (Escalate Threshold)</span>
+                    <span>100% (High Fraud)</span>
+                </div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
 
         # Quick Metric Overview
         m1, m2, m3, m4 = st.columns(4)
@@ -413,13 +499,32 @@ Please conduct a full investigation following the standard FWA workflow."""
         st.markdown("#### 📄 CMS Special Investigations Unit (SIU) Dossier")
         st.code(res["final_text"], language="markdown")
 
-        st.download_button(
-            label="💾 Download SIU Investigation Report (.txt)",
-            data=res["final_text"],
-            file_name=f"SIU_Investigation_{res['claim_id']}.txt",
-            mime="text/plain",
-            use_container_width=True,
-        )
+        c_dl1, c_dl2 = st.columns(2)
+        with c_dl1:
+            st.download_button(
+                label="💾 Download SIU Dossier (.txt)",
+                data=res["final_text"],
+                file_name=f"SIU_Investigation_{res['claim_id']}.txt",
+                mime="text/plain",
+                use_container_width=True,
+            )
+        with c_dl2:
+            audit_json = json.dumps({
+                "claim_id": res["claim_id"],
+                "beneficiary_id": res["beneficiary_id"],
+                "claim_amount": res["claim_amount"],
+                "verdict": res["verdict"],
+                "risk_score": res["score"],
+                "timestamp": datetime.utcnow().isoformat() + "Z",
+                "trace": res["trace_logs"],
+            }, indent=2)
+            st.download_button(
+                label="💾 Download Structured Audit Log (.json)",
+                data=audit_json,
+                file_name=f"Audit_Trace_{res['claim_id']}.json",
+                mime="application/json",
+                use_container_width=True,
+            )
 
 # ─────────────────────────────────────────────────────────────────────────────
 # TAB 2: BATCH SIMULATION & ANALYTICS
@@ -496,8 +601,30 @@ with tab_batch:
         st.plotly_chart(fig_scatter, use_container_width=True)
 
     st.markdown("#### 📑 Batch Claims Log")
+    filter_choice = st.radio(
+        "Filter Claims Table:",
+        ["All Claims", "CLEAR Only", "FLAG_FOR_REVIEW Only", "ESCALATE Only"],
+        horizontal=True,
+    )
+    filtered_df = df
+    if filter_choice == "CLEAR Only":
+        filtered_df = df[df["verdict"] == "CLEAR"]
+    elif filter_choice == "FLAG_FOR_REVIEW Only":
+        filtered_df = df[df["verdict"] == "FLAG_FOR_REVIEW"]
+    elif filter_choice == "ESCALATE Only":
+        filtered_df = df[df["verdict"] == "ESCALATE"]
+
     st.dataframe(
-        df[["claim_id", "beneficiary_id", "scenario_type", "claim_amount", "risk_score_pct", "verdict", "top_factor"]],
+        filtered_df[["claim_id", "beneficiary_id", "scenario_type", "claim_amount", "risk_score_pct", "verdict", "top_factor"]],
+        use_container_width=True,
+    )
+
+    csv_data = filtered_df.to_csv(index=False).encode("utf-8")
+    st.download_button(
+        label="📥 Download Filtered Batch Audit Log (.csv)",
+        data=csv_data,
+        file_name="Medicare_Batch_FWA_Audit.csv",
+        mime="text/csv",
         use_container_width=True,
     )
 
@@ -569,11 +696,8 @@ with tab_roi:
 
     with r_col2:
         total_part_d_spend = members * annual_spend_per_member
-        # CMS estimated improper payment rate ~6.8%
         improper_spend = total_part_d_spend * 0.068
-        # Traditional chase recovers ~15%
         traditional_recovery = improper_spend * 0.15
-        # AI Agent pre-payment blocks ~65%
         ai_agent_recovery = improper_spend * 0.65
         net_gain = ai_agent_recovery - traditional_recovery
 
