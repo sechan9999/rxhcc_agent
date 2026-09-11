@@ -110,22 +110,25 @@ st.markdown(
 
     /* Provider Preview Card */
     .provider-card {
-        background: #1e293b;
-        border: 1px solid #475569;
+        background: #f1f5f9;
+        border: 1px solid #cbd5e1;
+        border-left: 4px solid #38bdf8;
         border-radius: 8px;
         padding: 12px 16px;
-        margin-top: 10px;
+        margin: 12px 0;
         font-size: 0.9rem;
+        color: #0f172a;
+        box-shadow: 0 1px 3px rgba(0,0,0,0.05);
     }
 
     /* Risk Score Gauge Bar */
     .gauge-container {
         width: 100%;
-        background-color: #334155;
+        background-color: #e2e8f0;
         border-radius: 10px;
-        height: 22px;
+        height: 18px;
         overflow: hidden;
-        margin: 10px 0;
+        margin: 8px 0;
         position: relative;
     }
     .gauge-fill {
